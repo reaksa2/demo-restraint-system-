@@ -20,6 +20,20 @@ def _get_brand_or_404(db: Session, brand_id: uuid.UUID) -> Brand:
     return brand
 
 
+def _validate_parent(db: Session, brand_id: uuid.UUID, parent_id: uuid.UUID, self_id: uuid.UUID = None):
+    if parent_id is None:
+        return
+    if parent_id == self_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A category cannot be its own parent")
+    parent = db.query(Category).filter(Category.id == parent_id, Category.brand_id == brand_id).first()
+    if parent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent category not found in this brand")
+    # Keep this to two levels (top-level -> subcategory) to match how menus are
+    # actually displayed; a subcategory itself can't have children.
+    if parent.parent_id is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A subcategory cannot contain another subcategory")
+
+
 @router.get("", response_model=list[CategoryOut])
 def list_categories(brand_id: uuid.UUID, scope: dict = Depends(get_current_user_scope), db: Session = Depends(get_db)):
     assert_brand_access(db, scope["user"], brand_id, allow_staff=True)
@@ -36,6 +50,7 @@ def create_category(
 ):
     assert_can_manage_brand_content(db, scope["user"], brand_id)
     _get_brand_or_404(db, brand_id)
+    _validate_parent(db, brand_id, payload.parent_id)
 
     category = Category(brand_id=brand_id, **payload.model_dump())
     db.add(category)
@@ -57,7 +72,14 @@ def update_category(
     if category is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "parent_id" in data:
+        _validate_parent(db, brand_id, data["parent_id"], self_id=category_id)
+        # A category that already has its own subcategories can't become a subcategory itself.
+        if data["parent_id"] is not None and db.query(Category).filter(Category.parent_id == category_id).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This category has subcategories and cannot become a subcategory itself")
+
+    for field, value in data.items():
         setattr(category, field, value)
 
     db.commit()

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { foodsApi, pricesApi, imagesApi } from "../../services/resources";
+import { resolveMediaUrl } from "../../services/api";
 import { Button, Input, Textarea, Select, Checkbox } from "../ui";
 import { Modal } from "../Modal";
 import { Upload } from "lucide-react";
-import { resolveMediaUrl } from "../../services/api";
 
 export default function FoodEditorModal({
   open,
@@ -173,12 +173,27 @@ export default function FoodEditorModal({
           onChange={(e) => setForm({ ...form, category_id: e.target.value })}
         >
           <option value="">No category</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name_en}
-            </option>
-          ))}
+          {categories
+            .slice()
+            .sort((a, b) => {
+              // Group each subcategory directly under its parent in the dropdown.
+              const ka = a.parent_id
+                ? `${a.parent_id}-1-${a.sort_order}`
+                : `${a.id}-0-${a.sort_order}`;
+              const kb = b.parent_id
+                ? `${b.parent_id}-1-${b.sort_order}`
+                : `${b.id}-0-${b.sort_order}`;
+              return ka.localeCompare(kb);
+            })
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.parent_id ? `— ${c.name_en}` : c.name_en}
+              </option>
+            ))}
         </Select>
+        <p className="-mt-3 text-xs text-slate">
+          Subcategories are shown indented with "—".
+        </p>
 
         <div>
           <span className="mb-1.5 block text-sm font-medium text-ink">

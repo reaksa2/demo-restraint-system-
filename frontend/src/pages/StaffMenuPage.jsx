@@ -1,9 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { menuApi } from "../services/resources";
+import { resolveMediaUrl } from "../services/api";
 import { useAuth } from "../stores/authStore";
 import { LogOut } from "lucide-react";
-
-import { resolveMediaUrl } from "../services/api";
 
 export default function StaffMenuPage() {
   const { logout } = useAuth();
@@ -22,10 +21,31 @@ export default function StaffMenuPage() {
       );
   }, []);
 
-  const foodsByCategory = useMemo(() => {
+  const topCategories = useMemo(
+    () => (menu ? menu.categories.filter((c) => !c.parent_id) : []),
+    [menu],
+  );
+  const subcategoriesOf = (parentId) =>
+    menu.categories.filter((c) => c.parent_id === parentId);
+
+  // "All" stays a flat grid (quick overview). Selecting a specific top-level
+  // category groups its foods by subcategory, matching menus like:
+  // Special -> Steamed/Soup -> [foods], Special -> Grilled -> [foods].
+  const sections = useMemo(() => {
     if (!menu) return [];
-    if (activeCategory === "all") return menu.foods;
-    return menu.foods.filter((f) => f.category_id === activeCategory);
+    if (activeCategory === "all") {
+      return [{ heading: null, foods: menu.foods }];
+    }
+    const direct = menu.foods.filter((f) => f.category_id === activeCategory);
+    const subSections = subcategoriesOf(activeCategory)
+      .map((sub) => ({
+        heading: sub,
+        foods: menu.foods.filter((f) => f.category_id === sub.id),
+      }))
+      .filter((s) => s.foods.length > 0);
+    const directSection =
+      direct.length > 0 ? [{ heading: null, foods: direct }] : [];
+    return [...directSection, ...subSections];
   }, [menu, activeCategory]);
 
   if (error) {
@@ -79,7 +99,7 @@ export default function StaffMenuPage() {
           </button>
         </div>
 
-        {menu.categories.length > 0 && (
+        {topCategories.length > 0 && (
           <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-6 pb-3">
             <CategoryTab
               active={activeCategory === "all"}
@@ -87,7 +107,7 @@ export default function StaffMenuPage() {
               labelEn="All"
               labelKh="ទាំងអស់"
             />
-            {menu.categories.map((c) => (
+            {topCategories.map((c) => (
               <CategoryTab
                 key={c.id}
                 active={activeCategory === c.id}
@@ -101,14 +121,30 @@ export default function StaffMenuPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">
-        {foodsByCategory.length === 0 ? (
+        {sections.every((s) => s.foods.length === 0) ? (
           <p className="py-16 text-center text-slate">
             No foods in this category yet.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {foodsByCategory.map((food) => (
-              <FoodCard key={food.id} food={food} />
+          <div className="space-y-8">
+            {sections.map((section, i) => (
+              <div key={section.heading?.id || `direct-${i}`}>
+                {section.heading && (
+                  <div className="mb-3">
+                    <span className="font-khmer-display text-lg text-ink">
+                      {section.heading.name_kh}
+                    </span>
+                    <span className="ml-2 text-sm text-slate">
+                      {section.heading.name_en}
+                    </span>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {section.foods.map((food) => (
+                    <FoodCard key={food.id} food={food} />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

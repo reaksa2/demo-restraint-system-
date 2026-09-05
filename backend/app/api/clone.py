@@ -68,6 +68,9 @@ def clone_food_list(
     warnings: list[str] = []
 
     # --- build category map: source category id -> target category ---
+    # Top-level categories are cloned first, then subcategories, so a
+    # subcategory's parent_id can be remapped to the correct NEW parent
+    # in the target brand (never the source brand's parent id).
     target_categories_by_name = {
         c.name_en.strip().lower(): c for c in db.query(Category).filter(Category.brand_id == target_brand.id).all()
     }
@@ -75,7 +78,10 @@ def clone_food_list(
     category_map: dict[uuid.UUID, Optional[Category]] = {}
 
     source_categories = db.query(Category).filter(Category.brand_id == source_brand.id).all()
-    for src_cat in source_categories:
+    top_level = [c for c in source_categories if c.parent_id is None]
+    sub_level = [c for c in source_categories if c.parent_id is not None]
+
+    for src_cat in top_level:
         key = src_cat.name_en.strip().lower()
         existing = target_categories_by_name.get(key)
         if existing is not None:
@@ -83,6 +89,26 @@ def clone_food_list(
         else:
             new_cat = Category(
                 brand_id=target_brand.id,
+                name_en=src_cat.name_en,
+                name_kh=src_cat.name_kh,
+                sort_order=src_cat.sort_order,
+            )
+            db.add(new_cat)
+            db.flush()
+            target_categories_by_name[key] = new_cat
+            category_map[src_cat.id] = new_cat
+            categories_created += 1
+
+    for src_cat in sub_level:
+        key = src_cat.name_en.strip().lower()
+        existing = target_categories_by_name.get(key)
+        new_parent = category_map.get(src_cat.parent_id)
+        if existing is not None:
+            category_map[src_cat.id] = existing
+        else:
+            new_cat = Category(
+                brand_id=target_brand.id,
+                parent_id=new_parent.id if new_parent else None,
                 name_en=src_cat.name_en,
                 name_kh=src_cat.name_kh,
                 sort_order=src_cat.sort_order,
